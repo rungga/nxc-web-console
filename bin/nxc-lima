@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LIMA_BIN="${LIMA_BIN:-$(command -v limactl || true)}"
+LIMA_INSTANCE="${NXC_LIMA_INSTANCE:-netexec-lab}"
+HOST_STATE_DIR="${NXC_LIMA_STATE_DIR:-$HOME/.nxc-lima}"
+GUEST_STATE_HOME="$HOST_STATE_DIR/home"
+
+if [[ -z "$LIMA_BIN" ]]; then
+  printf '[nxc-lima] ERROR: limactl is not installed.\n' >&2
+  exit 127
+fi
+
+vm_status="$("$LIMA_BIN" list "$LIMA_INSTANCE" --format '{{.Status}}' 2>/dev/null || true)"
+if [[ -z "$vm_status" ]]; then
+  printf '[nxc-lima] ERROR: Lima instance %q does not exist.\n' "$LIMA_INSTANCE" >&2
+  exit 127
+fi
+if [[ "$vm_status" != "Running" ]]; then
+  "$LIMA_BIN" start --tty=false "$LIMA_INSTANCE" >/dev/null
+fi
+
+mkdir -p "$GUEST_STATE_HOME"
+
+exec "$LIMA_BIN" shell "$LIMA_INSTANCE" -- sh -lc '
+default_home=$(getent passwd "$(id -un)" | cut -d: -f6)
+nxc_bin="$default_home/.local/bin/nxc"
+if [ ! -x "$nxc_bin" ]; then
+  printf "[nxc-lima] ERROR: nxc is not installed in the Lima guest.\n" >&2
+  exit 127
+fi
+state_home=$1
+shift
+exec env HOME="$state_home" NXC_HOME="$state_home/.nxc" "$nxc_bin" "$@"
+' sh "$GUEST_STATE_HOME" "$@"
