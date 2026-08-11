@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-11
+
 ### Added
 
 - Interactive `./run.sh reset-password` recovery command with password policy validation.
@@ -11,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - WSL-aware callback route warnings and environment overrides for callback host and accepted source.
 - Rejected callback peer diagnostics in the listener API and browser UI.
 - WSL2 mirrored and NAT callback setup and troubleshooting documentation.
+- Application screenshots for the Scan and WSL2 NAT Back Connect workflows.
 
 ### Changed
 
