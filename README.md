@@ -21,15 +21,102 @@ Run the local console:
 ./run.sh
 ```
 
-Open `http://127.0.0.1:8000`. The first startup prints a generated administrator password once.
+Open `http://127.0.0.1:8000`. The first startup prints a generated administrator password once. That password is temporary: after login, only **Settings** is available until a new password is set.
 
-Keep the first-run password private and change it immediately in **Settings**. Runtime authentication data, signing keys, job history, and redacted logs are stored under `~/.nxc-webgui` by default and must never be committed.
+Keep the first-run password private. There is intentionally no shared default password such as `P@ssw0rd`. Runtime authentication data, signing keys, job history, and redacted logs are stored under `~/.nxc-webgui` by default and must never be committed.
+
+### Password recovery
+
+Reset an account interactively without placing the password in shell history:
+
+```bash
+./run.sh reset-password
+./run.sh reset-password --username analyst
+```
+
+A reset credential must be changed after the next login. For a controlled automation account, this can be disabled explicitly:
+
+```bash
+./run.sh reset-password --username service-account --no-force-change
+```
+
+Passwords must contain at least 12 characters and use at least three of these classes: lowercase, uppercase, digits, and symbols.
 
 ## Platform support
 
 - **macOS**: native `nxc` is preferred. The included Lima wrapper can use a separately provisioned `netexec-lab` VM.
 - **Linux**: install NetExec natively and ensure `nxc` is available on `PATH`, or set `NXC_BIN` explicitly.
 - **Windows**: not directly certified; WSL2 with a Linux NetExec installation is the expected path.
+
+## WSL2 callback networking
+
+The listener runs inside the WSL distribution. The authorized target must be able to reach the callback host and port shown in **Back Connect**. WSL mirrored mode is preferred on Windows 11 22H2 or newer.
+
+### Mirrored mode
+
+Create or update `%UserProfile%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+firewall=true
+```
+
+Restart WSL:
+
+```powershell
+wsl --shutdown
+```
+
+From an Administrator PowerShell session, allow only the callback port required by the authorized lab:
+
+```powershell
+New-NetFirewallHyperVRule `
+	-Name "NxcWebConsoleCallback4444" `
+	-DisplayName "NetExec Web Console callback 4444" `
+	-Direction Inbound `
+	-VMCreatorId "{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}" `
+	-Protocol TCP `
+	-LocalPorts 4444
+```
+
+Start the console with an explicit listener interface. Prefer the specific interface address over all interfaces:
+
+```bash
+NXCWEB_LISTENER_BIND='<wsl-or-lan-interface-ip>' ./run.sh
+```
+
+### NAT mode
+
+Default WSL2 NAT does not expose the private WSL address directly to LAN targets. Forward the Windows port to WSL from an Administrator PowerShell session:
+
+```powershell
+$Distro = "kali-linux"
+$Port = 4444
+$WslIp = ((wsl.exe -d $Distro hostname -I).Trim() -split '\s+')[0]
+
+netsh interface portproxy delete v4tov4 listenport=$Port listenaddress=0.0.0.0
+netsh interface portproxy add v4tov4 `
+	listenport=$Port listenaddress=0.0.0.0 `
+	connectport=$Port connectaddress=$WslIp
+
+New-NetFirewallRule `
+	-DisplayName "NetExec Web Console callback $Port" `
+	-Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port
+```
+
+Find the Windows LAN address with `ipconfig`, then start the console in WSL with explicit callback settings:
+
+```bash
+export NXCWEB_LISTENER_BIND="0.0.0.0"
+export NXCWEB_CALLBACK_HOST="192.168.1.20"
+export NXCWEB_CALLBACK_ALLOWED_SOURCE="$(ip route show default | awk '{print $3 "/32"; exit}')"
+./run.sh
+```
+
+Replace `192.168.1.20` with the actual Windows LAN address. Binding to `0.0.0.0` is broad; use a specific WSL interface address where possible and enforce a narrow Windows firewall rule. The WSL address can change after restart, requiring the `portproxy` rule to be recreated.
+
+The callback host remains editable in the browser for a one-off route. If **Active Listeners** shows `Last rejected callback`, set **Allowed source** to that displayed peer IP with a `/32` suffix. Microsoft documents current WSL networking behavior at <https://learn.microsoft.com/windows/wsl/networking>.
 
 ## NetExec runtime on macOS
 
@@ -149,6 +236,8 @@ Back-connect listeners now bind to `127.0.0.1` by default. To accept an authoriz
 | `NXCWEB_COOKIE_SECURE` | `false` | Require HTTPS-only session cookies; set `true` beyond local HTTP |
 | `NXCWEB_SECRET_KEY` | generated locally | Persistent session-signing secret |
 | `NXCWEB_LISTENER_BIND` | `127.0.0.1` | Back-connect listener bind address |
+| `NXCWEB_CALLBACK_HOST` | route-detected | Callback address reachable from the target; commonly the Windows LAN IP in WSL NAT |
+| `NXCWEB_CALLBACK_ALLOWED_SOURCE` | target `/32` | Source IP or CIDR accepted by listeners; a Windows gateway may be observed through `portproxy` |
 | `NXCWEB_MAX_CONCURRENT_JOBS` | `5` | Maximum concurrent running/stopping jobs |
 | `NXCWEB_MAX_RETAINED_JOBS` | `200` | Retained job history count |
 | `NXCWEB_MAX_JOB_LOG_BYTES` | `20971520` | Per-job disk log limit |
@@ -168,6 +257,21 @@ Back-connect listeners now bind to `127.0.0.1` by default. To accept an authoriz
 - macOS Lima setup is host-specific and not created automatically by this repository.
 - The local AI provider is rules-based; remote model quality and availability depend on the configured provider.
 - Broad cross-platform and high-concurrency certification is deferred until 1.0.
+
+## Back-connect troubleshooting
+
+Confirm the listener and inspect callback traffic inside WSL or Linux:
+
+```bash
+ss -lntp | grep ':4444'
+sudo tcpdump -ni any tcp port 4444
+```
+
+- No SYN reaches Linux: verify the callback host, Windows forwarding, route, and firewall.
+- `Last rejected callback` appears: **Allowed source** does not include the peer address observed by the listener.
+- A session opens and immediately closes: the remote command or shell process exited.
+- A trigger job fails: inspect **Jobs / Console** for the NetExec error.
+- `Triggered` means NetExec started the command; it does not confirm that a callback connected.
 
 ## Development
 

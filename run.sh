@@ -3,6 +3,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/backend"
 
+COMMAND="${1:-serve}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+case "$COMMAND" in
+  serve|reset-password)
+    ;;
+  help|-h|--help)
+    printf 'Usage: ./run.sh [serve|reset-password [--username USER] [--no-force-change]]\n'
+    exit 0
+    ;;
+  *)
+    printf 'Unknown command: %s\n' "$COMMAND" >&2
+    printf 'Usage: ./run.sh [serve|reset-password [--username USER] [--no-force-change]]\n' >&2
+    exit 2
+    ;;
+esac
+
 UV_BIN="${UV_BIN:-$(command -v uv || true)}"
 if [[ -z "$UV_BIN" && -x "$HOME/.local/bin/uv" ]]; then
   UV_BIN="$HOME/.local/bin/uv"
@@ -40,6 +58,14 @@ if [[ -n "$UV_BIN" ]]; then
   "$UV_BIN" pip install --python .venv/bin/python -q -r requirements.txt -c constraints.txt
 else
   .venv/bin/python -m pip install -q -r requirements.txt -c constraints.txt
+fi
+
+if [[ "$COMMAND" == "reset-password" ]]; then
+  exec .venv/bin/python -m app.cli reset-password "$@"
+fi
+if [[ $# -gt 0 ]]; then
+  printf 'The serve command does not accept positional arguments; use NXCWEB_* environment variables.\n' >&2
+  exit 2
 fi
 
 nxc_runtime_works() {

@@ -77,6 +77,7 @@ class UserResponse(BaseModel):
     username: str
     role: Literal["admin", "operator"]
     enabled: bool
+    must_change_password: bool
     created_at: float
     updated_at: float
 

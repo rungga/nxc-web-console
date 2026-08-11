@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Interactive `./run.sh reset-password` recovery command with password policy validation.
+- Mandatory password change for generated, newly created, and administrator-reset credentials.
+- WSL-aware callback route warnings and environment overrides for callback host and accepted source.
+- Rejected callback peer diagnostics in the listener API and browser UI.
+- WSL2 mirrored and NAT callback setup and troubleshooting documentation.
+
+### Changed
+
+- Callback hosts can be adjusted in the browser when route auto-detection is not reachable from the target.
+- Listener startup registers state before accepting clients, avoiding an early-connection race.
+
+### Security
+
+- Existing accounts migrate without forced lockout, while temporary credentials cannot access operational HTTP or WebSocket endpoints until changed.
+- The back-connect listener remains loopback-only by default; external binding still requires explicit operator configuration.
+
 ## [0.1.0-beta.1] - 2026-08-09
 
 ### Added

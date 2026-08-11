@@ -10,6 +10,7 @@ let currentUser = null;
 let currentBackconnectRoute = null;
 let lastGeneratedBackconnectCommand = "";
 let listenerSourceManuallyEdited = false;
+let callbackHostManuallyEdited = false;
 let routeRequestSequence = 0;
 let currentAiTarget = null;
 let currentAiField = null;
@@ -101,9 +102,7 @@ function stopListenerPolling() {
 async function tryRestoreSession() {
   try {
     const me = await API.get("/api/auth/me");
-    applyCurrentUser(me);
-    showApp();
-    await bootApp();
+    await enterAuthenticatedSession(me);
   } catch (_) {
     showLogin();
   }
@@ -117,9 +116,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   errorBox.textContent = "";
   try {
     const account = await API.post("/api/auth/login", { username, password });
-    applyCurrentUser(account);
-    showApp();
-    await bootApp();
+    await enterAuthenticatedSession(account);
   } catch (err) {
     errorBox.textContent = err.message;
   }
@@ -137,8 +134,28 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 
 function applyCurrentUser(account) {
   currentUser = account;
+  const passwordChangeRequired = Boolean(account.must_change_password);
   document.getElementById("whoami-user").textContent = `${account.username} (${account.role})`;
-  document.getElementById("users-tab-btn").classList.toggle("hidden", account.role !== "admin");
+  document.getElementById("users-tab-btn").classList.toggle("hidden", account.role !== "admin" || passwordChangeRequired);
+  document.querySelectorAll(".tab-btn").forEach((button) => {
+    button.disabled = passwordChangeRequired && button.dataset.tab !== "settings";
+  });
+  document.getElementById("password-change-notice").textContent = passwordChangeRequired
+    ? "This is a temporary credential. Set a new password before using the console."
+    : "";
+}
+
+async function enterAuthenticatedSession(account) {
+  applyCurrentUser(account);
+  showApp();
+  if (account.must_change_password) {
+    const runtimeStatus = document.getElementById("runtime-status");
+    runtimeStatus.textContent = "password change required";
+    runtimeStatus.className = "badge pwned";
+    switchTab("settings");
+    return;
+  }
+  await bootApp();
 }
 
 /* ---------------------------- Boot ---------------------------- */
@@ -351,6 +368,9 @@ async function refreshUsers() {
     enabledToggle.disabled = user.username.toLowerCase() === currentUser.username.toLowerCase();
     enabledCell.appendChild(enabledToggle);
 
+    const passwordCell = document.createElement("td");
+    passwordCell.textContent = user.must_change_password ? "Change required" : "Current";
+
     const createdCell = document.createElement("td");
     createdCell.textContent = user.created_at ? new Date(user.created_at * 1000).toLocaleString() : "";
 
@@ -378,7 +398,7 @@ async function refreshUsers() {
     });
     actionsCell.append(saveButton, deleteButton);
 
-    tr.append(usernameCell, roleCell, enabledCell, createdCell, actionsCell);
+    tr.append(usernameCell, roleCell, enabledCell, passwordCell, createdCell, actionsCell);
     tbody.appendChild(tr);
   });
 }
@@ -407,7 +427,7 @@ document.getElementById("user-create-form").addEventListener("submit", async (e)
       password: document.getElementById("user-create-password").value,
       role: document.getElementById("user-create-role").value,
     });
-    result.textContent = "Account created.";
+    result.textContent = "Account created. The user must change the initial password after login.";
     e.target.reset();
     await refreshUsers();
   } catch (err) {
@@ -424,7 +444,7 @@ document.getElementById("user-reset-form").addEventListener("submit", async (e) 
     await API.post(`/api/users/${encodeURIComponent(username)}/reset-password`, {
       new_password: document.getElementById("user-reset-password").value,
     });
-    result.textContent = "Password reset complete.";
+    result.textContent = "Password reset complete. The user must change it after login.";
     document.getElementById("user-reset-password").value = "";
   } catch (err) {
     result.textContent = `Error: ${err.message}`;
@@ -775,9 +795,12 @@ function updateGeneratedBackconnectCommand() {
 
 async function refreshBackconnectRoute(forceSource = false) {
   const target = document.getElementById("bc-target").value.trim();
+  const callbackHost = document.getElementById("bc-callback-host");
+  const routeWarning = document.getElementById("bc-route-warning");
   if (!target) {
     currentBackconnectRoute = null;
-    document.getElementById("bc-callback-host").value = "";
+    if (!callbackHostManuallyEdited) callbackHost.value = "";
+    routeWarning.textContent = "";
     return null;
   }
 
@@ -786,11 +809,12 @@ async function refreshBackconnectRoute(forceSource = false) {
   if (requestSequence !== routeRequestSequence) return currentBackconnectRoute;
 
   currentBackconnectRoute = route;
-  document.getElementById("bc-callback-host").value = route.callback_host;
+  if (!callbackHostManuallyEdited) callbackHost.value = route.callback_host;
   if (forceSource || !listenerSourceManuallyEdited) {
     document.getElementById("bc-listener-source").value = route.allowed_source;
     listenerSourceManuallyEdited = false;
   }
+  routeWarning.textContent = route.warning || "";
   updateGeneratedBackconnectCommand();
   return route;
 }
@@ -828,6 +852,10 @@ document.getElementById("bc-target").addEventListener("change", () => {
   });
 });
 document.getElementById("bc-listener-port").addEventListener("input", updateGeneratedBackconnectCommand);
+document.getElementById("bc-callback-host").addEventListener("input", (event) => {
+  callbackHostManuallyEdited = Boolean(event.target.value.trim());
+  updateGeneratedBackconnectCommand();
+});
 document.getElementById("bc-listener-source").addEventListener("input", () => {
   listenerSourceManuallyEdited = true;
 });
@@ -857,8 +885,12 @@ async function refreshListeners() {
           `<div><button class="link-btn open-session" data-id="${escapeHtml(s.id)}">${escapeHtml(s.peer)}</button> ${s.closed ? '<span class="badge pwned">closed</span>' : '<span class="badge ok">live</span>'}</div>`
         ).join("")
       : '<div class="muted">Waiting for connection...</div>';
+    const lastRejected = listener.rejected_connections?.at(-1);
+    const rejectedHtml = lastRejected
+      ? `<div class="error">Last rejected callback: ${escapeHtml(lastRejected.peer)} (${escapeHtml(lastRejected.reason)})</div>`
+      : "";
     box.innerHTML = `<div class="row-between"><strong>${escapeHtml(listener.label)} (:${escapeHtml(listener.port)}, ${escapeHtml(listener.allowed_source)})</strong>` +
-      `<button class="danger stop-listener" data-id="${escapeHtml(listener.id)}">Stop</button></div>${sessionsHtml}`;
+      `<button class="danger stop-listener" data-id="${escapeHtml(listener.id)}">Stop</button></div>${sessionsHtml}${rejectedHtml}`;
     container.appendChild(box);
   });
   container.querySelectorAll(".stop-listener").forEach((btn) =>
@@ -941,6 +973,7 @@ document.getElementById("bc-trigger-btn").addEventListener("click", async () => 
     await refreshBackconnectRoute(false);
     updateGeneratedBackconnectCommand();
     payload.command = document.getElementById("bc-command").value;
+    if (!document.getElementById("bc-callback-host").value.trim()) throw new Error("Callback host is required");
     if (!payload.command.trim()) throw new Error("Callback command is required");
     await ensureBackconnectListener();
     const job = await API.post("/api/backconnect/trigger", payload);
@@ -958,6 +991,7 @@ document.getElementById("bc-trigger-btn").addEventListener("click", async () => 
 document.getElementById("change-password-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const resultBox = document.getElementById("cp-result");
+  const wasRequired = Boolean(currentUser?.must_change_password);
   resultBox.textContent = "";
   try {
     await API.post("/api/auth/change-password", {
@@ -966,6 +1000,10 @@ document.getElementById("change-password-form").addEventListener("submit", async
     });
     resultBox.textContent = "Password updated.";
     e.target.reset();
+    if (wasRequired) {
+      applyCurrentUser({ ...currentUser, must_change_password: false });
+      await bootApp();
+    }
   } catch (err) {
     resultBox.textContent = "Error: " + err.message;
   }

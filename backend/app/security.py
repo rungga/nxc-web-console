@@ -25,7 +25,7 @@ from app import config
 
 PBKDF2_ITERATIONS = 260_000
 COOKIE_NAME = "nxcweb_session"
-AUTH_STORE_VERSION = 2
+AUTH_STORE_VERSION = 3
 ROLE_ADMIN = "admin"
 ROLE_OPERATOR = "operator"
 VALID_ROLES = {ROLE_ADMIN, ROLE_OPERATOR}
@@ -46,6 +46,7 @@ def _credential_record(
     role: str,
     created_at: float | None = None,
     session_version: int = 1,
+    must_change_password: bool = False,
 ) -> dict:
     salt = secrets.token_bytes(16)
     now = time.time()
@@ -54,6 +55,7 @@ def _credential_record(
         "hash": _hash_password(password, salt),
         "role": role,
         "enabled": True,
+        "must_change_password": must_change_password,
         "session_version": session_version,
         "created_at": created_at or now,
         "updated_at": now,
@@ -71,6 +73,9 @@ def _normalize_auth_store(data: dict) -> tuple[dict, bool]:
                 continue
             record.setdefault("role", ROLE_OPERATOR)
             record.setdefault("enabled", True)
+            if "must_change_password" not in record:
+                record["must_change_password"] = False
+                changed = True
             if "session_version" not in record:
                 record["session_version"] = 1
                 changed = True
@@ -89,6 +94,7 @@ def _normalize_auth_store(data: dict) -> tuple[dict, bool]:
                     "hash": data["hash"],
                     "role": ROLE_ADMIN,
                     "enabled": True,
+                    "must_change_password": False,
                     "session_version": 1,
                     "created_at": time.time(),
                     "updated_at": time.time(),
@@ -134,7 +140,7 @@ def bootstrap_admin_account() -> str | None:
 
     password = secrets.token_urlsafe(12)
     username = config.ADMIN_USERNAME.strip()
-    record = _credential_record(password, ROLE_ADMIN)
+    record = _credential_record(password, ROLE_ADMIN, must_change_password=True)
     record["username"] = username
     store["users"][_normalize_username(username)] = record
     _save_auth_store(store)
@@ -155,7 +161,7 @@ def verify_credentials(username: str, password: str) -> bool:
     return hmac.compare_digest(expected, computed)
 
 
-def change_password(username: str, new_password: str) -> None:
+def change_password(username: str, new_password: str, *, must_change_password: bool = False) -> None:
     with _AUTH_LOCK:
         store = _load_auth_store()
         key = _normalize_username(username)
@@ -165,7 +171,13 @@ def change_password(username: str, new_password: str) -> None:
         role = existing.get("role", ROLE_ADMIN) if existing else ROLE_ADMIN
         created_at = existing.get("created_at") if existing else None
         session_version = int(existing.get("session_version", 1)) + 1 if existing else 1
-        record = _credential_record(new_password, role, created_at, session_version)
+        record = _credential_record(
+            new_password,
+            role,
+            created_at,
+            session_version,
+            must_change_password=must_change_password,
+        )
         record["username"] = existing.get("username", username.strip()) if existing else username.strip()
         record["enabled"] = existing.get("enabled", True) if existing else True
         store["users"][key] = record
@@ -180,6 +192,7 @@ def get_user(username: str) -> dict | None:
         "username": record.get("username", username),
         "role": record.get("role", ROLE_OPERATOR),
         "enabled": bool(record.get("enabled", True)),
+        "must_change_password": bool(record.get("must_change_password", False)),
         "created_at": float(record.get("created_at", 0)),
         "updated_at": float(record.get("updated_at", 0)),
     }
@@ -192,6 +205,7 @@ def list_users() -> list[dict]:
             "username": record.get("username", key),
             "role": record.get("role", ROLE_OPERATOR),
             "enabled": bool(record.get("enabled", True)),
+            "must_change_password": bool(record.get("must_change_password", False)),
             "created_at": float(record.get("created_at", 0)),
             "updated_at": float(record.get("updated_at", 0)),
         })
@@ -208,7 +222,7 @@ def create_user(username: str, password: str, role: str) -> dict:
             raise ValueError("Username is required")
         if key in store["users"]:
             raise ValueError("Username already exists")
-        record = _credential_record(password, role)
+        record = _credential_record(password, role, must_change_password=True)
         record["username"] = username.strip()
         store["users"][key] = record
         _save_auth_store(store)
@@ -360,6 +374,13 @@ def get_current_user(request: Request, nxcweb_session: str | None = Cookie(defau
     user = get_user(username)
     if not user or not user["enabled"]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is disabled or missing")
+    password_change_paths = {
+        "/api/auth/me",
+        "/api/auth/logout",
+        "/api/auth/change-password",
+    }
+    if user["must_change_password"] and request.url.path not in password_change_paths:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Password change required")
     return user["username"]
 
 
@@ -375,4 +396,4 @@ def verify_ws_session(token: str | None) -> str | None:
         return None
     username = verify_session_token(token)
     user = get_user(username) if username else None
-    return user["username"] if user and user["enabled"] else None
+    return user["username"] if user and user["enabled"] and not user["must_change_password"] else None
