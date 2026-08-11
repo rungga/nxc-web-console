@@ -3,13 +3,24 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import socket
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app import config
 from app.queue_utils import offer_latest
+
+
+def is_wsl_environment() -> bool:
+    if os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/sys/kernel/osrelease").read_text().casefold()
+    except OSError:
+        return False
 
 
 def discover_callback_route(target: str) -> tuple[str, str]:
@@ -47,6 +58,13 @@ class Session:
 
 
 @dataclass
+class RejectedConnection:
+    peer: str
+    rejected_at: float = field(default_factory=time.time)
+    reason: str = "source_not_allowed"
+
+
+@dataclass
 class Listener:
     id: str
     port: int
@@ -55,6 +73,7 @@ class Listener:
     server: asyncio.base_events.Server
     created_at: float = field(default_factory=time.time)
     sessions: dict[str, Session] = field(default_factory=dict)
+    rejected_connections: list[RejectedConnection] = field(default_factory=list)
 
 
 class BackConnectManager:
@@ -68,7 +87,12 @@ class BackConnectManager:
         async def _on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             await self._handle_client(listener_id, reader, writer)
 
-        server = await asyncio.start_server(_on_client, host=config.LISTENER_BIND_HOST, port=port)
+        server = await asyncio.start_server(
+            _on_client,
+            host=config.LISTENER_BIND_HOST,
+            port=port,
+            start_serving=False,
+        )
         listener = Listener(
             id=listener_id,
             port=port,
@@ -77,6 +101,13 @@ class BackConnectManager:
             server=server,
         )
         self.listeners[listener_id] = listener
+        try:
+            await server.start_serving()
+        except Exception:
+            self.listeners.pop(listener_id, None)
+            server.close()
+            await server.wait_closed()
+            raise
         return listener
 
     async def _handle_client(self, listener_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -86,11 +117,13 @@ class BackConnectManager:
             return
 
         peer = writer.get_extra_info("peername")
+        peer_str = f"{peer[0]}:{peer[1]}" if peer else "unknown"
         if not peer or ipaddress.ip_address(peer[0].split("%", 1)[0]) not in listener.allowed_network:
+            listener.rejected_connections.append(RejectedConnection(peer=peer_str))
+            listener.rejected_connections = listener.rejected_connections[-20:]
             writer.close()
             await writer.wait_closed()
             return
-        peer_str = f"{peer[0]}:{peer[1]}" if peer else "unknown"
         session = Session(id=str(uuid.uuid4()), listener_id=listener_id, peer=peer_str, reader=reader, writer=writer)
         listener.sessions[session.id] = session
 

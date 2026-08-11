@@ -271,6 +271,15 @@ class SecurityTests(unittest.TestCase):
     def test_malformed_session_token_is_rejected(self) -> None:
         self.assertIsNone(security.verify_session_token("not-a-token"))
 
+    def test_bootstrap_admin_must_change_generated_password(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(config, "AUTH_STORE_PATH", Path(temp_dir) / "auth.json"):
+            with patch("app.security.secrets.token_urlsafe", return_value="GeneratedPassword1!"):
+                password = security.bootstrap_admin_account()
+
+            self.assertEqual(password, "GeneratedPassword1!")
+            self.assertTrue(security.verify_credentials("admin", password))
+            self.assertTrue(security.get_user("admin")["must_change_password"])
+
     def test_valid_session_token_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(config, "AUTH_STORE_PATH", Path(temp_dir) / "auth.json"):
             security.change_password("admin", "StrongPassword1!")
@@ -390,6 +399,9 @@ class CallbackListenerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await asyncio.wait_for(reader.read(), timeout=1), b"")
         self.assertFalse(listener.sessions)
+        self.assertEqual(len(listener.rejected_connections), 1)
+        self.assertTrue(listener.rejected_connections[0].peer.startswith("127.0.0.1:"))
+        self.assertEqual(listener.rejected_connections[0].reason, "source_not_allowed")
 
         writer.close()
         await writer.wait_closed()

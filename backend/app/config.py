@@ -43,6 +43,8 @@ WEB_HOST = os.environ.get("NXCWEB_HOST", "127.0.0.1")
 ADMIN_USERNAME = os.environ.get("NXCWEB_ADMIN_USER", "admin")
 
 LISTENER_BIND_HOST = os.environ.get("NXCWEB_LISTENER_BIND", "127.0.0.1")
+CALLBACK_HOST = os.environ.get("NXCWEB_CALLBACK_HOST", "").strip() or None
+CALLBACK_ALLOWED_SOURCE = os.environ.get("NXCWEB_CALLBACK_ALLOWED_SOURCE", "").strip() or None
 
 MAX_CONCURRENT_JOBS = int(os.environ.get("NXCWEB_MAX_CONCURRENT_JOBS", "5"))
 MAX_RETAINED_JOBS = int(os.environ.get("NXCWEB_MAX_RETAINED_JOBS", "200"))

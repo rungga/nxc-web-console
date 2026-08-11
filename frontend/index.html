@@ -187,8 +187,9 @@
         <select id="bc-protocol"></select>
         <label>Target</label>
         <input type="text" id="bc-target" placeholder="10.10.10.5" />
-        <label>Callback host</label>
-        <input type="text" id="bc-callback-host" readonly />
+        <label>Callback host reachable from target</label>
+        <input type="text" id="bc-callback-host" placeholder="Windows LAN IP when using WSL NAT" />
+        <div id="bc-route-warning" class="muted"></div>
         <label>Workspace</label>
         <select id="bc-workspace"></select>
         <label>Username(s)</label>
@@ -273,7 +274,7 @@
           <button id="users-refresh" class="link-btn">Refresh</button>
         </div>
         <table id="users-table">
-          <thead><tr><th>Username</th><th>Role</th><th>Enabled</th><th>Created</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Username</th><th>Role</th><th>Enabled</th><th>Password</th><th>Created</th><th>Actions</th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="users-result" class="muted"></div>
@@ -285,6 +286,7 @@
   <main id="tab-settings" class="tab-panel">
     <form id="change-password-form" class="card">
       <h2>Change Password</h2>
+      <div id="password-change-notice" class="error"></div>
       <label>Current password</label>
       <input type="password" id="cp-current" required />
       <label>New password</label>

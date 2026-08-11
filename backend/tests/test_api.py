@@ -45,7 +45,10 @@ class ApiIntegrationTests(unittest.TestCase):
         response = self.client.get("/api/auth/me")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"username": "admin", "role": "admin"})
+        self.assertEqual(
+            response.json(),
+            {"username": "admin", "role": "admin", "must_change_password": False},
+        )
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
         self.assertEqual(response.headers["cache-control"], "no-store")
 
@@ -70,6 +73,33 @@ class ApiIntegrationTests(unittest.TestCase):
             ).status_code,
             401,
         )
+
+    def test_initial_password_blocks_api_until_changed(self) -> None:
+        self.login()
+        self.client.post(
+            "/api/users",
+            json={"username": "first.login", "password": "InitialPassword1!", "role": "operator"},
+        )
+        self.client.post("/api/auth/logout")
+
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "first.login", "password": "InitialPassword1!"},
+        )
+
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(login.json()["must_change_password"])
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+        blocked = self.client.get("/api/health")
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(blocked.json()["detail"], "Password change required")
+
+        changed = self.client.post(
+            "/api/auth/change-password",
+            json={"current_password": "InitialPassword1!", "new_password": "ReplacementPassword2!"},
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(self.client.get("/api/health").status_code, 200)
 
     def test_admin_can_manage_operator_accounts(self) -> None:
         self.login()
@@ -274,6 +304,28 @@ class ApiIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_backconnect_route_reports_wsl_overrides_and_bind_warning(self) -> None:
+        self.login()
+
+        with (
+            patch("app.main.discover_callback_route", return_value=("172.24.1.2", "10.0.0.8/32")),
+            patch("app.main.is_wsl_environment", return_value=True),
+            patch.object(config, "CALLBACK_HOST", "192.168.1.20"),
+            patch.object(config, "CALLBACK_ALLOWED_SOURCE", "172.24.0.1/32"),
+            patch.object(config, "LISTENER_BIND_HOST", "127.0.0.1"),
+        ):
+            response = self.client.get("/api/backconnect/route", params={"target": "10.0.0.8"})
+
+        self.assertEqual(response.status_code, 200)
+        route = response.json()
+        self.assertEqual(route["callback_host"], "192.168.1.20")
+        self.assertEqual(route["allowed_source"], "172.24.0.1/32")
+        self.assertEqual(route["detected_callback_host"], "172.24.1.2")
+        self.assertTrue(route["wsl_detected"])
+        self.assertTrue(route["callback_overridden"])
+        self.assertTrue(route["source_overridden"])
+        self.assertIn("loopback", route["warning"])
 
     def test_ssh_shell_access_can_trigger_backconnect(self) -> None:
         self.login()

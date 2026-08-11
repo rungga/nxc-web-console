@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import config, nxc_db, security
 from app.ai_assistant import AiConfigurationError, AiProviderError, generate_suggestions, get_ai_status
-from app.backconnect import backconnect_manager, discover_callback_route
+from app.backconnect import backconnect_manager, discover_callback_route, is_wsl_environment
 from app.job_manager import job_manager
 from app.proto_defs import EXEC_METHODS, PROTOCOLS
 from app.schemas import (
@@ -87,7 +87,8 @@ async def on_startup() -> None:
         print(f"   username: {config.ADMIN_USERNAME}")
         print(f"   password: {generated_password}")
         print(" Save this password now, it will not be shown again.")
-        print(" Change it from the GUI (Settings) after logging in.")
+        print(" You must change it from Settings after logging in.")
+        print(" Recovery command: ./run.sh reset-password")
         print("=" * 70)
 
 
@@ -142,7 +143,11 @@ async def login(payload: LoginRequest, request: Request, response: Response):
         secure=config.COOKIE_SECURE,
         path="/",
     )
-    return {"username": account["username"], "role": account["role"]}
+    return {
+        "username": account["username"],
+        "role": account["role"],
+        "must_change_password": account["must_change_password"],
+    }
 
 
 @app.post("/api/auth/logout")
@@ -154,7 +159,11 @@ async def logout(response: Response, _user: str = Depends(get_current_user)):
 @app.get("/api/auth/me")
 async def me(user: str = Depends(get_current_user)):
     account = security.get_user(user)
-    return {"username": user, "role": account["role"] if account else security.ROLE_OPERATOR}
+    return {
+        "username": user,
+        "role": account["role"] if account else security.ROLE_OPERATOR,
+        "must_change_password": account["must_change_password"] if account else False,
+    }
 
 
 @app.post("/api/auth/change-password")
@@ -165,7 +174,7 @@ async def change_password(
 ):
     if not security.verify_credentials(user, payload.current_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
-    security.change_password(user, payload.new_password)
+    security.change_password(user, payload.new_password, must_change_password=False)
     response.set_cookie(
         key=COOKIE_NAME,
         value=security.create_session_token(user),
@@ -211,7 +220,7 @@ async def reset_user_password(
     admin: str = Depends(require_admin),
 ):
     try:
-        security.change_password(username, payload.new_password)
+        security.change_password(username, payload.new_password, must_change_password=True)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="User not found") from exc
     if username.casefold() == admin.casefold():
@@ -517,8 +526,37 @@ async def get_backconnect_hosts(protocol: str, workspace: str = "default", _user
 @app.get("/api/backconnect/route")
 async def get_backconnect_route(target: str, _user: str = Depends(get_current_user)):
     try:
-        callback_host, allowed_source = discover_callback_route(target)
-        return {"callback_host": callback_host, "allowed_source": allowed_source}
+        detected_callback_host, detected_allowed_source = discover_callback_route(target)
+        callback_host = config.CALLBACK_HOST or detected_callback_host
+        allowed_source = config.CALLBACK_ALLOWED_SOURCE or detected_allowed_source
+        wsl_detected = is_wsl_environment()
+        warnings: list[str] = []
+        if wsl_detected and not config.CALLBACK_HOST:
+            warnings.append(
+                "WSL detected. In NAT mode, use the Windows LAN IP as the callback host "
+                "or set NXCWEB_CALLBACK_HOST."
+            )
+        if wsl_detected and _is_loopback_host(config.LISTENER_BIND_HOST):
+            warnings.append(
+                "The listener is bound to loopback; external callbacks require an explicit "
+                "NXCWEB_LISTENER_BIND value and a narrow firewall rule."
+            )
+        if wsl_detected and not config.CALLBACK_ALLOWED_SOURCE:
+            warnings.append(
+                "Windows portproxy may appear as the Windows-to-WSL gateway; if a callback is "
+                "rejected, use the displayed peer IP as Allowed source."
+            )
+        return {
+            "callback_host": callback_host,
+            "allowed_source": allowed_source,
+            "detected_callback_host": detected_callback_host,
+            "detected_allowed_source": detected_allowed_source,
+            "callback_overridden": bool(config.CALLBACK_HOST),
+            "source_overridden": bool(config.CALLBACK_ALLOWED_SOURCE),
+            "listener_bind_host": config.LISTENER_BIND_HOST,
+            "wsl_detected": wsl_detected,
+            "warning": " ".join(warnings) or None,
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -546,6 +584,14 @@ async def list_listeners(_user: str = Depends(get_current_user)):
                 "label": listener_.label,
                 "allowed_source": str(listener_.allowed_network),
                 "created_at": listener_.created_at,
+                "rejected_connections": [
+                    {
+                        "peer": rejected.peer,
+                        "rejected_at": rejected.rejected_at,
+                        "reason": rejected.reason,
+                    }
+                    for rejected in listener_.rejected_connections
+                ],
                 "sessions": [
                     {"id": s.id, "peer": s.peer, "connected_at": s.connected_at, "closed": s.closed}
                     for s in listener_.sessions.values()

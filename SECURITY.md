@@ -23,5 +23,7 @@ Reports about the NetExec runtime itself should be sent to the upstream [NetExec
 
 - Run only against explicitly authorized systems.
 - Keep the web server on loopback unless it is protected by HTTPS, authentication, and a firewall.
+- Keep callback listeners on loopback unless an authorized external callback requires an explicit interface bind and narrow firewall rule.
+- Treat generated and administrator-reset passwords as temporary credentials and replace them immediately after login.
 - Never commit API keys, generated passwords, session keys, job databases, or assessment logs.
 - Treat AI suggestions and raw CLI arguments as untrusted until reviewed by an authorized operator.
