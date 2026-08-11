@@ -2,11 +2,17 @@
 
 [![Tests](https://github.com/rungga/nxc-web-console/actions/workflows/test.yml/badge.svg)](https://github.com/rungga/nxc-web-console/actions/workflows/test.yml)
 
-> Public beta (`0.1.0-beta.1`). This project is not production-ready and may introduce breaking changes before 1.0.
+> Stable release (`1.0.0`) for local, single-process use in authorized security labs. Review [deployment limitations](#deployment-limitations) before exposing the console beyond loopback.
 
 NetExec Security Console is an independent community web interface for authorized [NetExec](https://github.com/Pennyw0rth/NetExec) assessments. It is not an official NetExec project and is not affiliated with or endorsed by the NetExec maintainers.
 
 Use this software only on systems you own or are explicitly authorized to assess.
+
+## Application preview
+
+The examples below use documentation-only addresses and contain no live credentials or assessment data.
+
+![NetExec Security Console scan interface](docs/images/console-scan.png)
 
 ## Requirements
 
@@ -117,6 +123,12 @@ export NXCWEB_CALLBACK_ALLOWED_SOURCE="$(ip route show default | awk '{print $3 
 Replace `192.168.1.20` with the actual Windows LAN address. Binding to `0.0.0.0` is broad; use a specific WSL interface address where possible and enforce a narrow Windows firewall rule. The WSL address can change after restart, requiring the `portproxy` rule to be recreated.
 
 The callback host remains editable in the browser for a one-off route. If **Active Listeners** shows `Last rejected callback`, set **Allowed source** to that displayed peer IP with a `/32` suffix. Microsoft documents current WSL networking behavior at <https://learn.microsoft.com/windows/wsl/networking>.
+
+#### NAT mode application view
+
+The **Back Connect** view shows the Windows-reachable callback host and warns when `portproxy` may change the peer address observed by WSL.
+
+![Back Connect configured for WSL2 NAT](docs/images/wsl2-nat-backconnect.png)
 
 ## NetExec runtime on macOS
 
@@ -249,14 +261,14 @@ Back-connect listeners now bind to `127.0.0.1` by default. To accept an authoriz
 | `NXCWEB_AI_BASE_URL` | provider default | Governed provider endpoint |
 | `NXCWEB_AI_API_KEY` | empty | Provider secret; never expose it to the browser or Git |
 
-## Known beta limitations
+## Deployment limitations
 
 - No built-in TLS termination or production process supervisor.
 - The SQLite job store and in-memory listeners are designed for a single application process.
 - Active jobs and callback sessions do not recover across application restarts.
 - macOS Lima setup is host-specific and not created automatically by this repository.
 - The local AI provider is rules-based; remote model quality and availability depend on the configured provider.
-- Broad cross-platform and high-concurrency certification is deferred until 1.0.
+- Broad cross-platform and high-concurrency deployments are not certified.
 
 ## Back-connect troubleshooting
 

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`0.1.0-beta.1` is the only supported public beta. This beta is not approved for production deployment.
+`1.0.0` is the supported stable release for local, single-process use in authorized security labs. Non-loopback deployments require the HTTPS, secret-management, and firewall controls documented in the README.
 
 ## Reporting a vulnerability
 

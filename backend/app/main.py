@@ -36,7 +36,7 @@ from app.schemas import (
 )
 from app.security import COOKIE_NAME, get_current_user, require_admin
 
-app = FastAPI(title="NetExec Web GUI", version="0.1.0-beta.1")
+app = FastAPI(title="NetExec Web GUI", version="1.0.0")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 _WS_CONNECTION_COUNTS: dict[str, int] = {}
