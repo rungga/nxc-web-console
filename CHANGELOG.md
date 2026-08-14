@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Back-connect listeners now bind to all interfaces (`0.0.0.0`) by default, matching a manual `nc -l` listener, so authorized remote targets can call back without extra configuration. Set `NXCWEB_LISTENER_BIND=127.0.0.1` to restrict to loopback; per-connection `allowed_source` filtering still authorizes each peer regardless of bind address.
+
 ## [1.0.0] - 2026-08-11
 
 ### Added

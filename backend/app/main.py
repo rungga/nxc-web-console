@@ -73,8 +73,9 @@ def _startup_warnings() -> list[str]:
         warnings.append("Web server is exposed beyond loopback while secure cookies are disabled; use HTTPS and NXCWEB_COOKIE_SECURE=true.")
     if not _is_loopback_host(config.LISTENER_BIND_HOST):
         warnings.append(
-            "Back-connect listeners are exposed beyond loopback; set NXCWEB_LISTENER_BIND to the explicit interface "
-            "address or 0.0.0.0, then enforce a strict firewall allowlist."
+            "Back-connect listeners bind to all interfaces by default; each connection is still filtered by its "
+            "allowed_source network, but set NXCWEB_LISTENER_BIND=127.0.0.1 to restrict to loopback if external "
+            "callbacks are not required, and enforce a strict firewall allowlist otherwise."
         )
     return warnings
 

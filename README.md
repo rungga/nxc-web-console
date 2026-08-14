@@ -234,9 +234,9 @@ The built-in server binds to `127.0.0.1` and does not terminate TLS. For any non
 2. Set `NXCWEB_COOKIE_SECURE=true`.
 3. Set an explicit `NXCWEB_SECRET_KEY` through a secrets manager.
 4. Restrict host and network access with a firewall.
-5. Keep the back-connect listener on loopback unless external callbacks are explicitly required.
+5. Narrow the back-connect listener to loopback with `NXCWEB_LISTENER_BIND=127.0.0.1` unless external callbacks are required.
 
-Back-connect listeners now bind to `127.0.0.1` by default. To accept an authorized external callback, set `NXCWEB_LISTENER_BIND` to a specific interface address (preferred) or `0.0.0.0`, then enforce the narrowest possible firewall allowlist.
+Back-connect listeners bind to all interfaces (`0.0.0.0`) by default, matching a manual `nc -l` listener, so authorized remote targets can call back without extra configuration. Each accepted TCP connection is still matched against the listener's `allowed_source` network and closed immediately if the peer does not match. Set `NXCWEB_LISTENER_BIND` to a specific interface address or `127.0.0.1` to narrow exposure further, and enforce the narrowest possible firewall allowlist.
 
 ## Environment variables
 
@@ -247,7 +247,7 @@ Back-connect listeners now bind to `127.0.0.1` by default. To accept an authoriz
 | `NXCWEB_DATA_DIR` | `~/.nxc-webgui` | Auth, job database, signing key, and redacted logs |
 | `NXCWEB_COOKIE_SECURE` | `false` | Require HTTPS-only session cookies; set `true` beyond local HTTP |
 | `NXCWEB_SECRET_KEY` | generated locally | Persistent session-signing secret |
-| `NXCWEB_LISTENER_BIND` | `127.0.0.1` | Back-connect listener bind address |
+| `NXCWEB_LISTENER_BIND` | `0.0.0.0` | Back-connect listener bind address; set `127.0.0.1` to restrict to loopback |
 | `NXCWEB_CALLBACK_HOST` | route-detected | Callback address reachable from the target; commonly the Windows LAN IP in WSL NAT |
 | `NXCWEB_CALLBACK_ALLOWED_SOURCE` | target `/32` | Source IP or CIDR accepted by listeners; a Windows gateway may be observed through `portproxy` |
 | `NXCWEB_MAX_CONCURRENT_JOBS` | `5` | Maximum concurrent running/stopping jobs |
