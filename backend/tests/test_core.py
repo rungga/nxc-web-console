@@ -267,6 +267,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(len(warnings), 2)
         self.assertIn("secure cookies", warnings[0])
         self.assertIn("firewall", warnings[1])
+        self.assertIn("NXCWEB_LISTENER_BIND", warnings[1])
 
     def test_malformed_session_token_is_rejected(self) -> None:
         self.assertIsNone(security.verify_session_token("not-a-token"))
